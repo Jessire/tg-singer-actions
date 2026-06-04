@@ -22,6 +22,29 @@ jobs:
     - name: install tg-signer
       run: |
         pip3 install tg-signer
+    - name: warm up peers
+      env:
+        SESSION_STRING: ${{ secrets.SESSION_STRING }}
+      run: |
+        python3 << 'PYEOF'
+        import asyncio, os
+        from pyrogram import Client
+
+        async def main():
+            async with Client(
+                "my_account",
+                session_string=os.environ["SESSION_STRING"],
+                in_memory=True,
+            ) as app:
+                for username in ["@okemby_bot", "@peach_emby_bot", "@emospg_bot", "@EmbyPublicBot"]:
+                    try:
+                        chat = await app.get_chat(username)
+                        print(f"✅ {username} -> id={chat.id}")
+                    except Exception as e:
+                        print(f"❌ {username} -> {e}")
+
+        asyncio.run(main())
+        PYEOF
     - name: sign
       env:
         SESSION_STRING: ${{ secrets.SESSION_STRING }}
