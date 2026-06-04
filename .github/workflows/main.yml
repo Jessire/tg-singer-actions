@@ -1,6 +1,6 @@
 on:
   schedule:
-    - cron: '30 02 * * *'
+    - cron: '30 06 * * *'
   workflow_dispatch:
 permissions:
   actions: write
@@ -12,6 +12,10 @@ jobs:
     permissions:
       contents: write
     steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: true
+        fetch-depth: 0
     - uses: actions/setup-python@v6
       with:
         python-version: '3.13'
@@ -22,20 +26,17 @@ jobs:
       env:
         SESSION_STRING: ${{ secrets.SESSION_STRING }}
         TASK_MAP: ${{ secrets.TASK_MAP }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       run: |
         echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"' | while IFS=$'\t' read -r key value_json; do
             task_path=".signer/signs/${key}"
             mkdir -p ${task_path}
             config_name="${task_path}/config.json"
             echo "$value_json" | jq . > "$config_name"
-            # 避免隐私信息输出，若想输出日志则删除 `> /dev/null 2>&1`
-            tg-signer --session-string "$SESSION_STRING" run-once ${key} 
+            tg-signer --session-string "$SESSION_STRING" run-once ${key}
         done
-    - name: 拉取代码
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: true
-        fetch-depth: 0
     - name: 自动续命Actions(防止60天禁用action)
       run: |
         git config --global user.name "github-actions[bot]"
