@@ -19,32 +19,8 @@ jobs:
     - uses: actions/setup-python@v6
       with:
         python-version: '3.13'
-    - name: install tg-signer
-      run: |
-        pip3 install tg-signer
-    - name: warm up peers
-      env:
-        SESSION_STRING: ${{ secrets.SESSION_STRING }}
-      run: |
-        python3 << 'PYEOF'
-        import asyncio, os
-        from pyrogram import Client
-
-        async def main():
-            async with Client(
-                "my_account",
-                session_string=os.environ["SESSION_STRING"],
-                in_memory=True,
-            ) as app:
-                for username in ["@okemby_bot", "@peach_emby_bot", "@emospg_bot", "@EmbyPublicBot"]:
-                    try:
-                        chat = await app.get_chat(username)
-                        print(f"✅ {username} -> id={chat.id}")
-                    except Exception as e:
-                        print(f"❌ {username} -> {e}")
-
-        asyncio.run(main())
-        PYEOF
+    - name: install dependencies
+      run: pip3 install tg-signer openai
     - name: sign
       env:
         SESSION_STRING: ${{ secrets.SESSION_STRING }}
@@ -53,13 +29,168 @@ jobs:
         OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
         OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       run: |
-        echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"' | while IFS=$'\t' read -r key value_json; do
-            task_path=".signer/signs/${key}"
-            mkdir -p ${task_path}
-            config_name="${task_path}/config.json"
-            echo "$value_json" | jq . > "$config_name"
-            tg-signer --session-string "$SESSION_STRING" run-once ${key}
-        done
+        python3 << 'PYEOF'
+        import asyncio, base64, json, os
+        from pyrogram import Client
+        from pyrogram.handlers import MessageHandler
+
+        SESSION_STRING = os.environ["SESSION_STRING"]
+        TASK_MAP       = json.loads(os.environ["TASK_MAP"])
+        OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+        OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
+        OPENAI_MODEL   = os.environ.get("OPENAI_MODEL", "gemini-2.5-flash")
+
+        BOT_USERNAMES  = ["@okemby_bot", "@peach_emby_bot", "@emospg_bot", "@EmbyPublicBot"]
+        msg_queues     = {}   # chat_id -> asyncio.Queue
+
+        # ── 全局消息路由 ──────────────────────────────────────
+        async def _on_msg(client, message):
+            q = msg_queues.get(message.chat.id)
+            if q:
+                await q.put(message)
+
+        # ── 等待来自指定 chat 的下一条消息 ───────────────────
+        async def next_msg(chat_id, timeout=45, need_photo=False, need_markup=False):
+            q = msg_queues.get(chat_id)
+            if not q:
+                return None
+            deadline = asyncio.get_event_loop().time() + timeout
+            while True:
+                left = deadline - asyncio.get_event_loop().time()
+                if left <= 0:
+                    return None
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=max(left, 0.1))
+                    if need_photo and not msg.photo:
+                        continue
+                    if need_markup and not get_buttons(msg.reply_markup):
+                        continue
+                    return msg
+                except asyncio.TimeoutError:
+                    return None
+
+        # ── 工具函数 ──────────────────────────────────────────
+        def get_buttons(markup):
+            if not markup:
+                return []
+            if hasattr(markup, "inline_keyboard"):
+                return [btn.text for row in markup.inline_keyboard for btn in row]
+            if hasattr(markup, "keyboard"):
+                return [btn.text for row in markup.keyboard for btn in row]
+            return []
+
+        async def click_btn(app, msg, text):
+            markup = msg.reply_markup
+            if not markup:
+                return None
+            if hasattr(markup, "inline_keyboard"):
+                for row in markup.inline_keyboard:
+                    for btn in row:
+                        if text in btn.text or btn.text in text:
+                            try:
+                                await msg.click(btn.text)
+                                return btn.text
+                            except Exception as e:
+                                print(f"    click err: {e}")
+                                return None
+            if hasattr(markup, "keyboard"):          # Reply Keyboard
+                for row in markup.keyboard:
+                    for btn in row:
+                        if text in btn.text or btn.text in text:
+                            await app.send_message(msg.chat.id, btn.text)
+                            return btn.text
+            return None
+
+        async def ai_pick(image_bytes, buttons):
+            from openai import AsyncOpenAI
+            c = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+            b64  = base64.b64encode(image_bytes).decode()
+            opts = "\n".join(f"- {b}" for b in buttons)
+            resp = await c.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text",
+                     "text": f"请观察图片，从以下选项中选择最匹配的一项，只输出选项文字：\n{opts}"}
+                ]}],
+                max_tokens=50,
+            )
+            return resp.choices[0].message.content.strip()
+
+        # ── 单个 chat 签到流程 ────────────────────────────────
+        async def sign_chat(app, chat_info):
+            cid      = chat_info["chat_id"]
+            name     = chat_info.get("name", str(cid))
+            actions  = chat_info["actions"]
+            interval = float(chat_info.get("action_interval", 1))
+            print(f"\n  [{name}]  id={cid}")
+
+            for action in actions:
+                t = action["action"]
+
+                if t == 1:                               # 发送文本
+                    text = action["text"]
+                    await app.send_message(cid, text)
+                    print(f"    ✉️  → {text}")
+                    await asyncio.sleep(interval)
+
+                elif t == 3:                             # 点击按钮
+                    target = action["text"]
+                    print(f"    ⏳ 等待按钮 '{target}'...")
+                    msg = await next_msg(cid, timeout=45, need_markup=True)
+                    if not msg:
+                        print("    ⚠️  超时，未收到回复"); continue
+                    result = await click_btn(app, msg, target)
+                    if result:
+                        print(f"    ✅ 点击: {result}")
+                    else:
+                        print(f"    ⚠️  未找到 '{target}'，可用: {get_buttons(msg.reply_markup)}")
+                    await asyncio.sleep(interval)
+
+                elif t == 4:                             # AI 看图选按钮
+                    print("    ⏳ 等待图片验证码...")
+                    msg = await next_msg(cid, timeout=60, need_photo=True, need_markup=True)
+                    if not msg:
+                        print("    ⚠️  未收到图片"); continue
+                    buttons = get_buttons(msg.reply_markup)
+                    print(f"    🖼️  选项: {buttons}")
+                    raw       = await app.download_media(msg, in_memory=True)
+                    img_bytes = raw.getvalue() if hasattr(raw, "getvalue") else bytes(raw)
+                    answer    = await ai_pick(img_bytes, buttons)
+                    print(f"    🤖 AI: {answer}")
+                    result    = await click_btn(app, msg, answer)
+                    if result:
+                        print(f"    ✅ 点击: {result}")
+                    else:
+                        print(f"    ⚠️  未匹配，AI 回答: {answer}")
+                    await asyncio.sleep(interval)
+
+        # ── 主流程 ────────────────────────────────────────────
+        async def main():
+            async with Client("my_account", session_string=SESSION_STRING, in_memory=True) as app:
+                app.add_handler(MessageHandler(_on_msg))
+
+                print("=== 解析 peer ===")
+                for uname in BOT_USERNAMES:
+                    try:
+                        chat = await app.get_chat(uname)
+                        msg_queues[chat.id] = asyncio.Queue()
+                        print(f"  ✅ {uname} → {chat.id}")
+                    except Exception as e:
+                        print(f"  ❌ {uname}: {e}")
+
+                print("\n=== 开始签到 ===")
+                for task_name, cfg in TASK_MAP.items():
+                    print(f"\n任务: {task_name}")
+                    for chat_info in cfg.get("chats", []):
+                        try:
+                            await sign_chat(app, chat_info)
+                        except Exception as e:
+                            import traceback; traceback.print_exc()
+
+        asyncio.run(main())
+        PYEOF
     - name: 自动续命Actions(防止60天禁用action)
       run: |
         git config --global user.name "github-actions[bot]"
