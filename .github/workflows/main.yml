@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         persist-credentials: true
         fetch-depth: 0
@@ -30,7 +30,7 @@ jobs:
         OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       run: |
         python3 << 'PYEOF'
-        import asyncio, base64, json, os
+        import asyncio, base64, json, os, traceback
         from pyrogram import Client
         from pyrogram.handlers import MessageHandler
 
@@ -39,9 +39,13 @@ jobs:
         OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
         OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
         OPENAI_MODEL   = os.environ.get("OPENAI_MODEL", "gemini-2.5-flash")
+        AI_ENABLED     = bool(OPENAI_API_KEY.strip())
 
         BOT_USERNAMES  = ["@okemby_bot", "@peach_emby_bot", "@emospg_bot", "@EmbyPublicBot"]
         msg_queues     = {}   # chat_id -> asyncio.Queue
+
+        class SignFailure(RuntimeError):
+            pass
 
         # ── 全局消息路由 ──────────────────────────────────────
         async def _on_msg(client, message):
@@ -51,9 +55,7 @@ jobs:
 
         # ── 等待来自指定 chat 的下一条消息 ───────────────────
         async def next_msg(chat_id, timeout=45, need_photo=False, need_markup=False):
-            q = msg_queues.get(chat_id)
-            if not q:
-                return None
+            q = msg_queues.setdefault(chat_id, asyncio.Queue())
             deadline = asyncio.get_event_loop().time() + timeout
             while True:
                 left = deadline - asyncio.get_event_loop().time()
@@ -79,6 +81,12 @@ jobs:
                 return [btn.text for row in markup.keyboard for btn in row]
             return []
 
+        def is_ai_action(action):
+            try:
+                return int(action.get("action", -1)) == 4
+            except (TypeError, ValueError):
+                return False
+
         async def click_btn(app, msg, text):
             markup = msg.reply_markup
             if not markup:
@@ -91,8 +99,7 @@ jobs:
                                 await msg.click(btn.text)
                                 return btn.text
                             except Exception as e:
-                                print(f"    click err: {e}")
-                                return None
+                                raise SignFailure(f"点击按钮 '{btn.text}' 失败: {e}") from e
             if hasattr(markup, "keyboard"):          # Reply Keyboard
                 for row in markup.keyboard:
                     for btn in row:
@@ -102,6 +109,10 @@ jobs:
             return None
 
         async def ai_pick(image_bytes, buttons):
+            if not OPENAI_API_KEY:
+                raise SignFailure("缺少 OPENAI_API_KEY，无法处理图片验证码")
+            if not buttons:
+                raise SignFailure("图片验证码消息没有可点击选项")
             from openai import AsyncOpenAI
             c = AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
             b64  = base64.b64encode(image_bytes).decode()
@@ -116,7 +127,10 @@ jobs:
                 ]}],
                 max_tokens=50,
             )
-            return resp.choices[0].message.content.strip()
+            answer = resp.choices[0].message.content.strip()
+            if not answer:
+                raise SignFailure("AI 没有返回可用选项")
+            return answer
 
         # ── 单个 chat 签到流程 ────────────────────────────────
         async def sign_chat(app, chat_info):
@@ -124,10 +138,14 @@ jobs:
             name     = chat_info.get("name", str(cid))
             actions  = chat_info["actions"]
             interval = float(chat_info.get("action_interval", 1))
+            msg_queues.setdefault(cid, asyncio.Queue())
             print(f"\n  [{name}]  id={cid}")
 
-            for action in actions:
-                t = action["action"]
+            for index, action in enumerate(actions, start=1):
+                try:
+                    t = int(action["action"])
+                except (TypeError, ValueError) as e:
+                    raise SignFailure(f"步骤 {index}: 非法 action 类型 {action['action']!r}") from e
 
                 if t == 1:                               # 发送文本
                     text = action["text"]
@@ -140,19 +158,21 @@ jobs:
                     print(f"    ⏳ 等待按钮 '{target}'...")
                     msg = await next_msg(cid, timeout=45, need_markup=True)
                     if not msg:
-                        print("    ⚠️  超时，未收到回复"); continue
+                        raise SignFailure(f"步骤 {index}: 等待按钮 '{target}' 超时，未收到可点击回复")
                     result = await click_btn(app, msg, target)
                     if result:
                         print(f"    ✅ 点击: {result}")
                     else:
-                        print(f"    ⚠️  未找到 '{target}'，可用: {get_buttons(msg.reply_markup)}")
+                        raise SignFailure(
+                            f"步骤 {index}: 未找到按钮 '{target}'，可用按钮: {get_buttons(msg.reply_markup)}"
+                        )
                     await asyncio.sleep(interval)
 
                 elif t == 4:                             # AI 看图选按钮
                     print("    ⏳ 等待图片验证码...")
                     msg = await next_msg(cid, timeout=60, need_photo=True, need_markup=True)
                     if not msg:
-                        print("    ⚠️  未收到图片"); continue
+                        raise SignFailure(f"步骤 {index}: 未收到带按钮的图片验证码")
                     buttons = get_buttons(msg.reply_markup)
                     print(f"    🖼️  选项: {buttons}")
                     raw       = await app.download_media(msg, in_memory=True)
@@ -163,13 +183,35 @@ jobs:
                     if result:
                         print(f"    ✅ 点击: {result}")
                     else:
-                        print(f"    ⚠️  未匹配，AI 回答: {answer}")
+                        raise SignFailure(
+                            f"步骤 {index}: AI 选择 '{answer}' 未匹配到按钮，可用按钮: {buttons}"
+                        )
                     await asyncio.sleep(interval)
+                else:
+                    raise SignFailure(f"步骤 {index}: 不支持的 action 类型 {t}")
+
+            return {"chat_id": cid, "name": name, "steps": len(actions)}
 
         # ── 主流程 ────────────────────────────────────────────
         async def main():
             async with Client("my_account", session_string=SESSION_STRING, in_memory=True) as app:
                 app.add_handler(MessageHandler(_on_msg))
+                successes = []
+                failures = []
+                requires_ai = any(
+                    is_ai_action(action)
+                    for cfg in TASK_MAP.values()
+                    for chat in cfg.get("chats", [])
+                    for action in chat.get("actions", [])
+                )
+
+                print("=== AI 配置 ===")
+                print(f"AI enabled: {AI_ENABLED}")
+                print(f"AI model: {OPENAI_MODEL}")
+                print(f"AI base url configured: {bool(OPENAI_BASE_URL)}")
+                print(f"Tasks requiring AI: {requires_ai}")
+                if requires_ai and not AI_ENABLED:
+                    raise SystemExit("存在 action=4 的任务，但未配置 OPENAI_API_KEY")
 
                 print("=== 解析 peer ===")
                 for uname in BOT_USERNAMES:
@@ -185,9 +227,36 @@ jobs:
                     print(f"\n任务: {task_name}")
                     for chat_info in cfg.get("chats", []):
                         try:
-                            await sign_chat(app, chat_info)
+                            result = await sign_chat(app, chat_info)
+                            successes.append({"task": task_name, **result})
+                            print(f"  ✅ 完成: {result['name']}")
                         except Exception as e:
-                            import traceback; traceback.print_exc()
+                            failures.append(
+                                {
+                                    "task": task_name,
+                                    "chat_id": chat_info.get("chat_id"),
+                                    "name": chat_info.get("name", str(chat_info.get("chat_id"))),
+                                    "reason": str(e) or e.__class__.__name__,
+                                }
+                            )
+                            print(f"  ❌ 失败: {chat_info.get('name', chat_info.get('chat_id'))} -> {e}")
+                            traceback.print_exc()
+
+                print("\n=== 签到摘要 ===")
+                print(f"成功: {len(successes)}")
+                for item in successes:
+                    print(f"  - [{item['task']}] {item['name']} (chat_id={item['chat_id']})")
+
+                print(f"失败: {len(failures)}")
+                for item in failures:
+                    print(
+                        f"  - [{item['task']}] {item['name']} (chat_id={item['chat_id']}): {item['reason']}"
+                    )
+
+                if failures:
+                    raise SystemExit(f"签到失败，共 {len(failures)} 个 chat 失败")
+                if not successes:
+                    raise SystemExit("签到失败，没有任何 chat 完成签到")
 
         asyncio.run(main())
         PYEOF
