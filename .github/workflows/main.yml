@@ -95,7 +95,7 @@ jobs:
               '        photo_message = message\\n'
           )
           core_text, core_count = re.subn(
-              r'        buttons = _get_inline_keyboard_buttons\(message\)\n        photo_message = message\n',
+              r'\s*buttons = _get_inline_keyboard_buttons\(message\)\r?\n\s*photo_message = message\r?\n',
               new_core,
               core_text,
               count=1,
