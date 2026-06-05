@@ -26,6 +26,80 @@ jobs:
       - name: install tg-signer
         run: pip3 install tg-signer
 
+      - name: patch tg-signer runtime
+        run: |
+          python - <<'PY'
+          import re
+          import site
+          from pathlib import Path
+
+          package_dir = Path(site.getsitepackages()[0]) / "tg_signer"
+          ai_tools_path = package_dir / "ai_tools.py"
+          core_path = package_dir / "core.py"
+
+          ai_tools_text = ai_tools_path.read_text(encoding="utf-8")
+          ai_tools_text, ai_prompt_count = re.subn(
+              r'sys_prompt = """[\s\S]*?client = client or self\.client',
+              '''sys_prompt = """You are a Telegram sign-in captcha solver. Read the image carefully and choose the single best option from the provided candidates.
+Rules:
+1. Focus on the actual content inside the image, such as Chinese characters, numbers, letters, colors, objects, positions, or captcha text.
+2. Ignore decorative emoji, numbering, and punctuation in button labels. Match the core meaning.
+3. If the image asks for the matching option, choose the option whose meaning is the closest exact match to the image.
+4. If no option is perfect, still choose the closest one.
+Reply only as JSON:
+{
+  "option": 0,
+  "reason": "short reason"
+}
+"""
+        client = client or self.client''',
+              ai_tools_text,
+              count=1,
+          )
+          ai_tools_text, ai_query_count = re.subn(
+              r'text_query = f".*?"\n        messages = \[',
+              '''text_query = (
+            "Task: solve the Telegram sign-in image challenge.\\n"
+            f"Question or context: {query}\\n"
+            f"Candidates: {json.dumps(options, ensure_ascii=False)}\\n"
+            "Return the zero-based index of the best candidate."
+        )
+        messages = [''',
+              ai_tools_text,
+              count=1,
+          )
+          if ai_prompt_count != 1 or ai_query_count != 1:
+              raise SystemExit("Failed to patch tg_signer/ai_tools.py")
+          ai_tools_path.write_text(ai_tools_text, encoding="utf-8")
+
+          core_text = core_path.read_text(encoding="utf-8")
+          core_text, core_count = re.subn(
+              r'        buttons = _get_inline_keyboard_buttons\(message\)\n        photo_message = message\n',
+              '''        text = _get_message_text(message) or ""
+        terminal_phrases = (
+            "\\u5df2\\u7b7e\\u5230",
+            "\\u4e0d\\u8981\\u91cd\\u590d\\u7b7e\\u5230",
+            "\\u7b7e\\u5230\\u673a\\u4f1a\\u5df2\\u7528\\u5b8c",
+            "\\u4eca\\u5929\\u5df2\\u7b7e\\u5230",
+            "\\u5df2\\u7ecf\\u7b7e\\u5230",
+        )
+        if any(phrase in text for phrase in terminal_phrases):
+            self.log(f"Detected terminal sign-in message, skip image solving: {text}")
+            return True
+
+        buttons = _get_inline_keyboard_buttons(message)
+        photo_message = message
+''',
+              core_text,
+              count=1,
+          )
+          if core_count != 1:
+              raise SystemExit("Failed to patch tg_signer/core.py")
+          core_path.write_text(core_text, encoding="utf-8")
+
+          print("Patched tg-signer runtime successfully.")
+          PY
+
       - name: sign
         env:
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
@@ -35,13 +109,13 @@ jobs:
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
         run: |
           set -euo pipefail
-          echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"' | while IFS=$'\t' read -r key value_json; do
+          while IFS=$'\t' read -r key value_json; do
               task_path=".signer/signs/${key}"
               mkdir -p "${task_path}"
               config_name="${task_path}/config.json"
               echo "$value_json" | jq . > "$config_name"
               tg-signer --session-string "$SESSION_STRING" run-once "${key}"
-          done
+          done < <(echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"')
 
       - name: keep-actions-alive
         run: |
