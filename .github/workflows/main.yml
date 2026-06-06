@@ -30,7 +30,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          from textwrap import dedent
+          from textwrap import dedent, indent
 
           import tg_signer.ai_tools as ai_tools_module
           import tg_signer.core as core_module
@@ -74,6 +74,7 @@ jobs:
                       return completion.choices[0].message.content.strip()
 
               ''').lstrip("\n")
+              ai_insert = indent(ai_insert, "    ")
               ai_tools_text = ai_tools_text.replace(
                   "    async def calculate_problem(\n",
                   ai_insert + "    async def calculate_problem(\n",
@@ -176,6 +177,7 @@ jobs:
                       return True
                   return False
           ''').lstrip("\n")
+          replacement = indent(replacement, "    ")
           core_text = core_text[:start] + replacement + core_text[end:]
           core_path.write_text(core_text, encoding="utf-8")
           print(f"patched {ai_tools_path}")
