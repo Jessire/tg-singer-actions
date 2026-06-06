@@ -200,8 +200,19 @@ jobs:
               task_path=".signer/signs/${key}"
               mkdir -p "${task_path}"
               config_name="${task_path}/config.json"
+              log_file="${task_path}/tg-signer.log"
               echo "$value_json" | jq . > "$config_name"
-              tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}"
+              set +e
+              tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"
+              signer_status=${PIPESTATUS[0]}
+              set -e
+              if [ "$signer_status" -ne 0 ]; then
+                  exit "$signer_status"
+              fi
+              if grep -E "PEER_ID_INVALID|PeerIdInvalid|ID not found|Traceback" "$log_file"; then
+                  echo "::error::tg-signer reported a sign failure. Check TASK_MAP chat_id/session; numeric chat IDs must be known to this Telegram session or replaced with usernames."
+                  exit 1
+              fi
           done
 
       - name: keep-actions-alive
