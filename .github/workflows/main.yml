@@ -191,14 +191,17 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
         run: |
           set -euo pipefail
+          num_of_dialogs="${TG_SIGNER_NUM_OF_DIALOGS:-500}"
+          echo "Using tg-signer --num-of-dialogs ${num_of_dialogs}"
           echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"' | while IFS=$'\t' read -r key value_json; do
               task_path=".signer/signs/${key}"
               mkdir -p "${task_path}"
               config_name="${task_path}/config.json"
               echo "$value_json" | jq . > "$config_name"
-              tg-signer --session-string "$SESSION_STRING" run-once "${key}"
+              tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}"
           done
 
       - name: keep-actions-alive
