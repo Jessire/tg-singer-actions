@@ -105,8 +105,21 @@ jobs:
                       return True
 
                   photo_message = message if getattr(message, "photo", None) else None
-                  if not photo_message and previous_messages:
+                  if buttons and not photo_message and previous_messages:
                       photo_message = self._find_previous_photo_message(previous_messages, message)
+                  elif not buttons and not photo_message and previous_messages and message_text:
+                      image_text_markers = (
+                          "\u9a8c\u8bc1\u7801",
+                          "\u56fe\u7247",
+                          "\u56fe\u4e2d",
+                          "\u8bf7\u8f93\u5165",
+                          "\u56de\u590d",
+                          "captcha",
+                          "verify",
+                          "code",
+                      )
+                      if any(marker in message_text.lower() for marker in image_text_markers):
+                          photo_message = self._find_previous_photo_message(previous_messages, message)
 
                   if photo_message and photo_message.photo:
                       self.log("Detected image; calling AI vision")
@@ -119,11 +132,15 @@ jobs:
                       if buttons:
                           options = [btn.text for btn in buttons]
                           query = message_text or _get_message_text(photo_message) or "Choose the correct option"
-                          result_index = await self.get_ai_tools().choose_option_by_image(
-                              image_bytes,
-                              query,
-                              list(enumerate(options)),
-                          )
+                          try:
+                              result_index = await self.get_ai_tools().choose_option_by_image(
+                                  image_bytes,
+                                  query,
+                                  list(enumerate(options)),
+                              )
+                          except Exception as exc:
+                              self.log(f"AI image option selection failed: {exc}", level="WARNING")
+                              return False
                           if result_index < 0 or result_index >= len(buttons):
                               self.log("AI returned an invalid option index", level="WARNING")
                               return False
@@ -141,7 +158,11 @@ jobs:
                           return True
 
                       query = _get_message_text(photo_message) or message_text or "Read the captcha or answer in the image. Return only the text to send to the bot."
-                      answer = await self.get_ai_tools().read_text_from_image(image_bytes, query)
+                      try:
+                          answer = await self.get_ai_tools().read_text_from_image(image_bytes, query)
+                      except Exception as exc:
+                          self.log(f"AI image text extraction failed: {exc}", level="WARNING")
+                          return False
                       answer = answer.strip()
                       self.log(f"AI text result: {answer}")
                       if not answer:
