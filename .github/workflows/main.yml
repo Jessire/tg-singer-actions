@@ -50,6 +50,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '15' }}
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
         run: |
           set -euo pipefail
@@ -69,7 +70,7 @@ jobs:
               if [ "$signer_status" -ne 0 ]; then
                   exit "$signer_status"
               fi
-              if grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return" "$log_file"; then
+              if grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return|object has no attribute|Could not parse AI option|AI result does not contain an option|TimeoutError|脚本流程第 .* 次尝试失败|AI .*失败|AI 未返回" "$log_file"; then
                   echo "::error::tg-signer reported a sign failure. Check TASK_MAP chat_id/actions/session/AI settings."
                   exit 1
               fi
