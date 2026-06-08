@@ -1,8 +1,7 @@
 on:
-  workflow_dispatch:
-  repository_dispatch:
-    types:
-      - external-schedule
+  schedule:
+    - cron: '10 0 * * *'
+      timezone: 'Asia/Shanghai'
 
 permissions:
   contents: read
