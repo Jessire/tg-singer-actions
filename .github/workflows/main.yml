@@ -80,6 +80,5 @@ jobs:
                   overall_status=1
                   continue
               fi
-              fi
           done < <(echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"')
           exit "$overall_status"
