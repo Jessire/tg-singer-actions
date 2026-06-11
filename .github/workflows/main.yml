@@ -50,8 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           num_of_dialogs="${TG_SIGNER_NUM_OF_DIALOGS:-500}"
+          overall_status=0
           echo "Using tg-signer --num-of-dialogs ${num_of_dialogs}"
-          echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"' | while IFS=$'\t' read -r key value_json; do
+          while IFS=$'\t' read -r key value_json; do
               task_path=".signer/signs/${key}"
               mkdir -p "${task_path}"
               config_name="${task_path}/config.json"
@@ -63,11 +64,15 @@ jobs:
               signer_status=${PIPESTATUS[0]}
               set -e
               if [ "$signer_status" -ne 0 ]; then
-                  exit "$signer_status"
+                  echo "::error title=Task ${key} failed::tg-signer exited with status ${signer_status}."
+                  overall_status=1
+                  continue
               fi
               # Only fail on terminal signer/AI errors, not transient retry warnings that later recover.
               if grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return|object has no attribute|Could not parse AI option|AI result does not contain an option|TimeoutError|AI .*失败|AI 未返回" "$log_file"; then
-                  echo "::error::tg-signer reported a sign failure. Check TASK_MAP chat_id/actions/session/AI settings."
-                  exit 1
+                  echo "::error title=Task ${key} reported terminal errors::Check TASK_MAP chat_id/actions/session/AI settings."
+                  overall_status=1
+                  continue
               fi
-          done
+          done < <(echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"')
+          exit "$overall_status"
