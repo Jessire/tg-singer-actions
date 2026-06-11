@@ -62,7 +62,7 @@ jobs:
               echo "$value_json" | jq . > "$config_name"
               echo "Running task ${key}"
               set +e
-              tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"
+              { tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"; } || true
               signer_status=${PIPESTATUS[0]}
               set -e
               if [ "$signer_status" -ne 0 ]; then
