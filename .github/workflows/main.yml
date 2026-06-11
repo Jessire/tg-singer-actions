@@ -2,6 +2,7 @@ on:
   schedule:
     - cron: '10 0 * * *'
       timezone: 'Asia/Shanghai'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -46,7 +47,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
-          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '15' }}
+          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '20' }}
+          SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
         run: |
           set -euo pipefail
