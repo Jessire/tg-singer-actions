@@ -69,10 +69,15 @@ jobs:
                   continue
               fi
               # Only fail on terminal signer/AI errors, not transient retry warnings that later recover.
-              if grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return|object has no attribute|Could not parse AI option|AI result does not contain an option|TimeoutError|AI .*失败|AI 未返回" "$log_file"; then
+              set +e
+              grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return|object has no attribute|Could not parse AI option|AI result does not contain an option|TimeoutError|AI .*失败|AI 未返回" "$log_file" >/dev/null
+              log_scan_status=$?
+              set -e
+              if [ "$log_scan_status" -eq 0 ]; then
                   echo "::error title=Task ${key} reported terminal errors::Check TASK_MAP chat_id/actions/session/AI settings."
                   overall_status=1
                   continue
+              fi
               fi
           done < <(echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"')
           exit "$overall_status"
