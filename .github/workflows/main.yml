@@ -47,7 +47,7 @@ jobs:
           AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '20' }}
           SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
-          SIGN_TASK_FLOW_RETRY_ATTEMPTS: ${{ vars.SIGN_TASK_FLOW_RETRY_ATTEMPTS || '1' }}
+          SIGN_TASK_FLOW_RETRY_ATTEMPTS: ${{ vars.SIGN_TASK_FLOW_RETRY_ATTEMPTS || '2' }}
           SIGN_TASK_RETRY_BACKOFF_STEPS: ${{ vars.SIGN_TASK_RETRY_BACKOFF_STEPS || '0' }}
         run: |
           set -euo pipefail
@@ -62,7 +62,7 @@ jobs:
               echo "$value_json" | jq . > "$config_name"
               echo "Running task ${key}"
               set +e
-              { tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"; } || true
+              tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"
               signer_status=${PIPESTATUS[0]}
               set -e
               if [ "$signer_status" -ne 0 ]; then
