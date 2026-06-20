@@ -49,6 +49,7 @@ jobs:
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
           SIGN_TASK_FLOW_RETRY_ATTEMPTS: ${{ vars.SIGN_TASK_FLOW_RETRY_ATTEMPTS || '2' }}
           SIGN_TASK_RETRY_BACKOFF_STEPS: ${{ vars.SIGN_TASK_RETRY_BACKOFF_STEPS || '0' }}
+          ALLOW_PARTIAL_CHAT_FAILURES: ${{ vars.ALLOW_PARTIAL_CHAT_FAILURES || 'true' }}
         run: |
           set -euo pipefail
           num_of_dialogs="${TG_SIGNER_NUM_OF_DIALOGS:-500}"
@@ -65,18 +66,27 @@ jobs:
               tg-signer --session-string "$SESSION_STRING" run-once --num-of-dialogs "$num_of_dialogs" "${key}" 2>&1 | tee "$log_file"
               signer_status=${PIPESTATUS[0]}
               set -e
-              if [ "$signer_status" -ne 0 ]; then
-                  echo "::error title=Task ${key} failed::tg-signer exited with status ${signer_status}."
+              # Only fail on global signer/auth errors, not transient per-chat failures or retry warnings.
+              set +e
+              grep -E "SESSION_REVOKED|AUTH_KEY_UNREGISTERED|API_ID_INVALID|PHONE_CODE_INVALID|PHONE_NUMBER_INVALID|SESSION_PASSWORD_NEEDED|AuthenticationError|PermissionDeniedError" "$log_file" >/dev/null
+              global_error_scan_status=$?
+              chat_start_count=$(grep -Ec "开始执行任务对象:" "$log_file")
+              chat_failure_count=$(grep -Ec "Sign chat failed for chat_id=" "$log_file")
+              if [ "$chat_failure_count" -eq 0 ]; then
+                  chat_failure_count=$(grep -Ec "签到失败: .*chat_id=" "$log_file")
+              fi
+              set -e
+              if [ "$global_error_scan_status" -eq 0 ]; then
+                  echo "::error title=Task ${key} reported global errors::Check SESSION_STRING and AI provider settings."
                   overall_status=1
                   continue
               fi
-              # Only fail on terminal signer/AI errors, not transient retry warnings that later recover.
-              set +e
-              grep -E "PEER_ID_INVALID|PeerIdInvalid|Action did not complete|AI .* failed|AI did not return|object has no attribute|Could not parse AI option|AI result does not contain an option|TimeoutError|AI .*失败|AI 未返回" "$log_file" >/dev/null
-              log_scan_status=$?
-              set -e
-              if [ "$log_scan_status" -eq 0 ]; then
-                  echo "::error title=Task ${key} reported terminal errors::Check TASK_MAP chat_id/actions/session/AI settings."
+              if [ "${ALLOW_PARTIAL_CHAT_FAILURES,,}" != "false" ] && [ "$signer_status" -ne 0 ] && [ "$chat_failure_count" -gt 0 ] && [ "$chat_start_count" -gt "$chat_failure_count" ]; then
+                  echo "::warning title=Task ${key} had partial chat failures::At least one chat failed, but other configured chats completed. Check ${log_file} for the failed chat_id."
+                  continue
+              fi
+              if [ "$signer_status" -ne 0 ]; then
+                  echo "::error title=Task ${key} failed::tg-signer exited with status ${signer_status}."
                   overall_status=1
                   continue
               fi

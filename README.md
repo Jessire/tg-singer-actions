@@ -9,4 +9,5 @@
     a. SESSION_STRING="your_session_string"
 
     b. TASK_MAP="your_task_map" (格式见`TASK_MAP_DEMO.json`，任务配置可通过本地tg-signer设置好任务后获取)
-4. 测试action
+4. 可选 repository variable: `ALLOW_PARTIAL_CHAT_FAILURES` 默认为 `true`，单个聊天对象失败但其他对象已执行时只标记 warning；设为 `false` 可恢复任意聊天失败即 Action 失败。
+5. 测试action
