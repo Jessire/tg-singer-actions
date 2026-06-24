@@ -44,7 +44,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
-          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '20' }}
+          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '8' }}
           AI_VISION_RETRY_ATTEMPTS: ${{ vars.AI_VISION_RETRY_ATTEMPTS || '3' }}
           AI_VISION_RETRY_DELAY: ${{ vars.AI_VISION_RETRY_DELAY || '0.6' }}
           SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
