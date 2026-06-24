@@ -41,12 +41,11 @@ jobs:
         env:
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
           TASK_MAP: ${{ secrets.TASK_MAP }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
-          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '8' }}
-          AI_VISION_RETRY_ATTEMPTS: ${{ vars.AI_VISION_RETRY_ATTEMPTS || '2' }}
-          AI_VISION_RETRY_DELAY: ${{ vars.AI_VISION_RETRY_DELAY || '0.6' }}
+          PADDLEOCR_API_URL: ${{ secrets.PADDLEOCR_API_URL }}
+          PADDLEOCR_API_TOKEN: ${{ secrets.PADDLEOCR_API_TOKEN }}
+          PADDLEOCR_MODEL: ${{ vars.PADDLEOCR_MODEL || 'PaddleOCR-VL-1.6' }}
+          PADDLEOCR_TIMEOUT: ${{ vars.PADDLEOCR_TIMEOUT || '22' }}
+          PADDLEOCR_POLL_INTERVAL: ${{ vars.PADDLEOCR_POLL_INTERVAL || '0.8' }}
           SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
           SIGN_TASK_FLOW_RETRY_ATTEMPTS: '1'
