@@ -43,7 +43,8 @@ jobs:
           TASK_MAP: ${{ secrets.TASK_MAP }}
           PADDLEOCR_API_URL: ${{ secrets.PADDLEOCR_API_URL }}
           PADDLEOCR_API_TOKEN: ${{ secrets.PADDLEOCR_API_TOKEN }}
-          PADDLEOCR_MODEL: ${{ vars.PADDLEOCR_MODEL || 'PaddleOCR-VL-1.6' }}
+          PADDLEOCR_TEXT_MODEL: ${{ vars.PADDLEOCR_TEXT_MODEL || 'PP-OCRv5' }}
+          PADDLEOCR_CHOICE_MODEL: ${{ vars.PADDLEOCR_CHOICE_MODEL || 'PaddleOCR-VL-1.6' }}
           PADDLEOCR_TIMEOUT: ${{ vars.PADDLEOCR_TIMEOUT || '22' }}
           PADDLEOCR_POLL_INTERVAL: ${{ vars.PADDLEOCR_POLL_INTERVAL || '0.8' }}
           SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
