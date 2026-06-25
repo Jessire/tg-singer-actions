@@ -41,14 +41,12 @@ jobs:
         env:
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
           TASK_MAP: ${{ secrets.TASK_MAP }}
-          PADDLEOCR_API_URL: ${{ secrets.PADDLEOCR_API_URL }}
-          PADDLEOCR_API_TOKEN: ${{ secrets.PADDLEOCR_API_TOKEN }}
-          PADDLEOCR_TEXT_MODEL: ${{ vars.PADDLEOCR_TEXT_MODEL || 'PP-OCRv5' }}
-          PADDLEOCR_CHOICE_MODEL: ${{ vars.PADDLEOCR_CHOICE_MODEL || 'PaddleOCR-VL-1.6' }}
-          PADDLEOCR_TIMEOUT: ${{ vars.PADDLEOCR_TIMEOUT || '22' }}
-          PADDLEOCR_POLL_INTERVAL: ${{ vars.PADDLEOCR_POLL_INTERVAL || '0.8' }}
-          PADDLEOCR_TEXT_IMAGE_SCALE: ${{ vars.PADDLEOCR_TEXT_IMAGE_SCALE || '3' }}
-          SIGN_TASK_SAVE_FAILED_OCR_IMAGES: 'true'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          AI_VISION_TIMEOUT: ${{ vars.AI_VISION_TIMEOUT || '8' }}
+          AI_VISION_RETRY_ATTEMPTS: ${{ vars.AI_VISION_RETRY_ATTEMPTS || '2' }}
+          AI_VISION_RETRY_DELAY: ${{ vars.AI_VISION_RETRY_DELAY || '0.6' }}
           SIGN_TASK_ACTION_TIMEOUT: ${{ vars.SIGN_TASK_ACTION_TIMEOUT || '40' }}
           TG_SIGNER_NUM_OF_DIALOGS: ${{ vars.TG_SIGNER_NUM_OF_DIALOGS }}
           SIGN_TASK_FLOW_RETRY_ATTEMPTS: '1'
@@ -85,9 +83,8 @@ jobs:
                   overall_status=1
                   continue
               fi
-              if [ "${ALLOW_PARTIAL_CHAT_FAILURES,,}" != "false" ] && [ "$chat_failure_count" -gt 0 ] && [ "$chat_start_count" -gt "$chat_failure_count" ]; then
+              if [ "${ALLOW_PARTIAL_CHAT_FAILURES,,}" != "false" ] && [ "$signer_status" -ne 0 ] && [ "$chat_failure_count" -gt 0 ] && [ "$chat_start_count" -gt "$chat_failure_count" ]; then
                   echo "::warning title=Task ${key} had partial chat failures::At least one chat failed, but other configured chats completed. Check ${log_file} for the failed chat_id."
-                  overall_status=1
                   continue
               fi
               if [ "$signer_status" -ne 0 ]; then
@@ -97,14 +94,3 @@ jobs:
               fi
           done < <(echo "$TASK_MAP" | jq -r 'to_entries[] | "\(.key)\t\(.value | tojson)"')
           exit "$overall_status"
-
-      - name: upload signer diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: signer-diagnostics
-          path: |
-            .signer/signs/**/tg-signer.log
-            .signer/debug/ocr/*
-          if-no-files-found: ignore
-          retention-days: 7
