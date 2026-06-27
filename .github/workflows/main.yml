@@ -83,6 +83,11 @@ jobs:
                   overall_status=1
                   continue
               fi
+              if [ "${ALLOW_PARTIAL_CHAT_FAILURES,,}" = "false" ] && [ "$chat_failure_count" -gt 0 ]; then
+                  echo "::error title=Task ${key} had chat failures::Detected ${chat_failure_count} failed chat(s). Check ${log_file} for the failed chat_id."
+                  overall_status=1
+                  continue
+              fi
               if [ "${ALLOW_PARTIAL_CHAT_FAILURES,,}" != "false" ] && [ "$signer_status" -ne 0 ] && [ "$chat_failure_count" -gt 0 ] && [ "$chat_start_count" -gt "$chat_failure_count" ]; then
                   echo "::warning title=Task ${key} had partial chat failures::At least one chat failed, but other configured chats completed. Check ${log_file} for the failed chat_id."
                   continue
